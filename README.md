@@ -13,3 +13,5 @@ State defaults to `.presswire/`. Immutable JSON records and append-only history 
 Test with `/Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/release/kujo run tests/test.kujo`, then run `./bin/presswire doctor --json`.
 
 0.1.0 covers the documented local records, fixtures, validation, checksums, deterministic fixed-time IDs, and structured export. It does not manufacture human judgment, consent, rights, approval, or causation. 0.1.0 ships offline fixture and bounded local-filesystem adapters; hosted providers and Git/static-site effects are unavailable unless explicitly configured through a future adapter.
+
+Local publication requires an approval-scoped JSON input, matching source SHA-256, \`--path\`, \`--output\`, and \`--act --yes\`. It writes atomically, returns a Publication Receipt, refuses existing targets unless \`--force\` is explicitly used for the safe replacement, and derives an idempotency key that prevents duplicate effects across timestamps.
