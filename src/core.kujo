@@ -14,11 +14,20 @@ func init(p){d:=state(p);if file_exists(d)&&path_is_symlink(d){return {"ok":fals
 func parse_object(text){mut v:=null;try {v=parse_json(text)} except err {return {"ok":false,"error":"malformed JSON"}};if type(v)!="dict"{return {"ok":false,"error":"input must be a JSON object"}};return {"ok":true,"value":v}}
 func payload(p){f:=flag(p,"input","");if f==""{return {"ok":true,"value":{}}};if !path_is_file(f){return {"ok":false,"error":"input file not found"}};if path_is_symlink(f)||file_size(f)>1048576{return {"ok":false,"error":"unsafe or oversized input"}};parsed:=parse_object(read_file(f));if !parsed["ok"]{return parsed};v:=parsed["value"];s:=get(v,"schema_version","1.0.0");if type(s)!="string"||!starts_with(s,"1."){return {"ok":false,"error":"incompatible schema_version"}};return {"ok":true,"value":v}}
 func domain(c,v,p){if SLUG=="dossier"&&(c=="evidence classify"||c=="verify"){cl:=get(v,"classification","");if cl!=""&&!has(["verified","observed","inferred","opinion","hypothesis","planned","conflicted","expired","unavailable","rejected"],cl){return "invalid evidence classification"};if cl=="verified"&&get(v,"captured_support","")==""{return "verified evidence requires captured support"}};if SLUG=="bluepencil"&&c=="review"{ver:=get(v,"verdict","unverified");if !has(["pass","pass_with_queries","revise","blocked","reject","unverified"],ver){return "invalid verdict"};if len(get(v,"blocking_findings",[]))>0&&(ver=="pass"||ver=="pass_with_queries"){return "blockers cannot be averaged away"}};if SLUG=="versionseal"&&c=="approve"{for k in ["human_actor","package_id","package_version","manifest_checksum","destination","action"]{if get(v,k,"")==""{return "approval missing "+k}};if flag(p,"actor","")!=v["human_actor"]{return "actor must match human_actor"}};if SLUG=="presswire"&&has(["publish","schedule","correct","unpublish"],c){if flag(p,"act",false)!=true||flag(p,"yes",false)!=true{return "effects require --act --yes"};if get(v,"approval_id","")==""||get(v,"manifest_checksum","")==""{return "approval evidence required"};if get(v,"authorized_action","")!=c{return "approval action mismatch"}};return ""}
+func approval_guard(c,v){
+    if !has(["publish","schedule","correct","unpublish"],c){return ""}
+    f:=get(v,"approval_record_path","");if f==""||!path_is_file(f)||path_is_symlink(f)||file_size(f)>1048576{return "VersionSeal approval record required"}
+    parsed:=parse_object(read_file(f));if !parsed["ok"]{return "invalid VersionSeal approval record"};r:=parsed["value"]
+    if get(r,"id","")!=get(v,"approval_id","")||get(r,"command","")!="approve"{return "approval identity mismatch"}
+    approval_payload:=get(r,"payload",{});if get(approval_payload,"manifest_checksum","")!=get(v,"manifest_checksum",""){return "approval checksum scope mismatch"}
+    if get(approval_payload,"destination","")!=get(v,"destination","")||get(approval_payload,"action","")!=c{return "approval destination or action scope mismatch"}
+    return ""
+}
 func kind(c){a:=split(c," ");return a[0]}
 func idprefix(c){if SLUG=="storydesk"{if kind(c)=="idea"{return "idea"};if kind(c)=="campaign"{return "campaign"};if kind(c)=="commission"{return "brief"};if c=="assign"{return "assignment"};if c=="handoff"{return "handoff"}};if SLUG=="dossier"&&has(["claim","source","evidence","rights"],kind(c)){return kind(c)};if SLUG=="galleypack"{if c=="build"||c=="freeze"{return "package"};return "artifact"};if SLUG=="bluepencil"{return "review"};if SLUG=="versionseal"{return "approval"};if SLUG=="presswire"{return "publication"};if SLUG=="readersignal"{if c=="learn"||c=="followup"{return "learning"};return "measurement"};if SLUG=="assetworks"{return "asset"};return PREFIX}
 func create(c,p) {
     i:=init(p);if !i["ok"]{return i};x:=payload(p);if !x["ok"]{return x};v:=x["value"]
-    e:=domain(c,v,p);if e!=""{return {"ok":false,"error":e}}
+    e:=domain(c,v,p);if e==""{e=approval_guard(c,v)};if e!=""{return {"ok":false,"error":e}}
     actor:=flag(p,"actor","");if actor==""{return {"ok":false,"error":"mutating commands require --actor"}}
     ts:=flag(p,"timestamp",now_utc());pre:=idprefix(c);id:=flag(p,"id","")
     if id=="" {
