@@ -1,0 +1,3 @@
+.presswire/
+*.tmp-*
+.env

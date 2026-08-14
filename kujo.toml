@@ -1,0 +1,4 @@
+[package]
+name = "presswire"
+version = "0.1.0"
+entry = "presswire.kujo"
