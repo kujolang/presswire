@@ -2,8 +2,9 @@
 ## gate: production_validation
 $ bash scripts/validate.sh
 check passed: presswire.kujo
-18 passed; 0 failed
+19 passed; 0 failed
 7 passed; 0 failed
+4 passed; 0 failed
 4 passed; 0 failed
 presswire validation passed.
 gate production_validation: pass
