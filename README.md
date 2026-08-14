@@ -1,9 +1,9 @@
 # PressWire
 
 [![Version](https://img.shields.io/badge/version-0.2.0-black)](VERSION)
-[![CI](https://github.com/kujolang/presswire/actions/workflows/validate.yml/badge.svg)](https://github.com/kujolang/presswire/actions/workflows/validate.yml)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 [![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
+[![CI](https://github.com/kujolang/presswire/actions/workflows/validate.yml/badge.svg)](https://github.com/kujolang/presswire/actions/workflows/validate.yml)
 
 PressWire is a local-first Kujo tool for approval-gated publication effects, receipts, corrections, and idempotent local delivery. It has no required hosted service, database server, model key, or sibling-tool dependency.
 
