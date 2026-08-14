@@ -7,11 +7,11 @@
 
 PressWire is a local-first Kujo tool for approval-gated publication effects, receipts, corrections, and idempotent local delivery. It has no required hosted service, database server, model key, or sibling-tool dependency.
 
-## Readiness posture
+## Production capabilities
 
-PressWire is ready for serious standalone workflows: immutable records, append-only audit events, atomic writes, per-record locks, bounded inputs and queries, structured errors, deterministic fixtures, strict domain contracts, and explicit authority boundaries. Optional external capabilities fail honestly when no adapter is configured. It does not claim hosted identity or distributed multi-host coordination.
+PressWire provides immutable records, append-only audit events, atomic writes, per-record locks, bounded inputs and queries, structured errors, CMS/Git-static/newsletter conformance fixtures, resumable effect reconciliation, explicit compensation rules, optional signed VersionSeal verification, and deterministic partial-provider fault injection. Optional external capabilities fail honestly when no adapter is configured. It does not claim hosted identity or distributed multi-host coordination.
 
-See the [production review](docs/PRODUCTION_READINESS_REVIEW.md) and [next-session worklist](docs/NEXT_SESSION.md).
+See the [production review](docs/PRODUCTION_READINESS_REVIEW.md) and completed [hardening worklist](docs/NEXT_SESSION.md).
 
 ## Quick install
 
