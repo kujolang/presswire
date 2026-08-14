@@ -1,5 +1,5 @@
 from src.core import dispatch
-from cli import parse_args
+from src.args import parse_args
 mut pass:=0;mut fail:=0
 func check(ok,label){if ok{pass=pass+1}else{fail=fail+1;eprint("FAIL: "+label)}}
 root:="/tmp/presswire-test-"+uuid_v4()

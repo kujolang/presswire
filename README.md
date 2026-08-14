@@ -1,17 +1,61 @@
 # PressWire
 
-Bounded publication gateway for approved packages with adapter capabilities, preflight, idempotency, and receipts.
+[![Version](https://img.shields.io/badge/version-0.1.0-black)](VERSION)
+[![CI](https://github.com/kujolang/presswire/actions/workflows/validate.yml/badge.svg)](https://github.com/kujolang/presswire/actions/workflows/validate.yml)
+[![License](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+[![built with Kujo](https://img.shields.io/badge/built%20with-Kujo-white.svg)](https://github.com/kujolang/kujo)
 
-PressWire 0.1.0 is an independently installable, local-first Kujo tool. It requires no hosted service, Chain of Command, WebOps, or sibling Publishing House tool. The canonical entrypoint is `presswire.kujo`; `bin/presswire` contains no product logic.
+PressWire is a local-first Kujo tool for approval-gated publication effects, receipts, corrections, and idempotent local delivery. It has no required hosted service, database server, model key, or sibling-tool dependency.
 
-## CLI
+## Readiness posture
 
-Commands: preflight; adapters; capabilities; schedule; publish; status; correct; unpublish; receipt; history; doctor; version; init; show; export; validate; report. Run `./bin/presswire help` for flags. Mutations require `--actor`; JSON input uses `--input`. Common flags include `--json`, `--dry-run`, `--state`, `--output`, `--config`, and `--force`. Exit codes: 0 success, 1 validation/operation failure, 2 usage error.
+PressWire is ready for serious standalone workflows: immutable records, append-only audit events, atomic writes, per-record locks, bounded inputs and queries, structured errors, deterministic fixtures, strict domain contracts, and explicit authority boundaries. Optional external capabilities fail honestly when no adapter is configured. It does not claim hosted identity or distributed multi-host coordination.
 
-State defaults to `.presswire/`. Immutable JSON records and append-only history use atomic writes. IDs reject traversal; symlinks and oversized inputs are rejected. See [contracts](docs/contracts.md), [security](docs/security.md), and [quickstart](examples/quickstart.md).
+See the [production review](docs/PRODUCTION_READINESS_REVIEW.md) and [next-session worklist](docs/NEXT_SESSION.md).
 
-Test with `/Users/robertdevore/2026/Kujolang/kujo-repos/kujo/target/release/kujo run tests/test.kujo`, then run `./bin/presswire doctor --json`.
+## Quick install
 
-0.1.0 covers the documented local records, fixtures, validation, checksums, deterministic fixed-time IDs, and structured export. It does not manufacture human judgment, consent, rights, approval, or causation. 0.1.0 ships offline fixture and bounded local-filesystem adapters; hosted providers and Git/static-site effects are unavailable unless explicitly configured through a future adapter.
+Requires Kujo 1.0.1 or newer.
 
-Local publication requires an approval-scoped JSON input with \`approval_record_path\` pointing to the exact VersionSeal record, matching source SHA-256, \`--path\`, \`--output\`, and \`--act --yes\`. PressWire verifies approval identity, decision, destination, action, and checksum scope. It writes atomically, returns a Publication Receipt, refuses existing targets unless \`--force\` is explicitly used for the safe replacement, and derives an idempotency key that prevents duplicate effects across timestamps.
+```bash
+git clone https://github.com/kujolang/presswire.git
+cd presswire
+export KUJO_BIN=/absolute/path/to/kujo
+export PATH="$PWD/bin:$PATH"
+presswire --version --json
+presswire doctor --json
+```
+
+## Quick start
+
+```bash
+presswire init --state .presswire --json
+presswire preflight --input fixtures/core.json --actor publisher --json
+presswire validate --json
+presswire export --output presswire-export.json --json
+```
+
+Run `presswire --help` for the complete command surface. Common flags include `--state`, `--config`, `--input`, `--actor`, `--timestamp`, `--id`, `--path`, `--type`, `--after`, `--limit`, `--output`, `--force`, `--dry-run`, and `--json`. JSON mode uses the stable `ok/data/error/error_code/tool_version/contract_version` envelope. Exit codes are 0 success, 1 operational failure, and 2 usage error.
+
+State defaults to `.presswire/`. Traversal, symlinks, secret-shaped fields, malformed JSON, incompatible schemas, duplicate IDs, checksum drift, oversized resources, and unsafe overwrites fail closed. Core behavior is implemented entirely in Kujo; adapters remain optional.
+
+## Project structure
+
+```text
+presswire.kujo       canonical entrypoint
+src/                  publication runtime and shared Kujo modules
+tests/                regression, security, and domain suites
+schemas/              public JSON contracts
+fixtures/             deterministic offline inputs
+scripts/              validation gates
+docs/                 contracts, security, review, and future work
+bin/presswire        logic-free launcher
+```
+
+## Verification
+
+```bash
+bash scripts/validate.sh
+```
+
+The gate checks the entrypoint, every Kujo suite, JSON artifacts, CLI smoke paths, foreign-runtime boundaries, and the Git diff.
