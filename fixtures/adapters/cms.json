@@ -1,0 +1,1 @@
+{"schema_version":"1.0.0","provider_class":"cms","offline_fixture":true,"implicit_credentials":false,"operations":["preflight","publish","status","correct","unpublish"]}

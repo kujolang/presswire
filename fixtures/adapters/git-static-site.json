@@ -1,0 +1,1 @@
+{"schema_version":"1.0.0","provider_class":"git-static-site","offline_fixture":true,"implicit_credentials":false,"operations":["preflight","publish","status","correct","unpublish"]}
