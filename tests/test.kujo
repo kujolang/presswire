@@ -18,7 +18,7 @@ check(dispatch("version",opts([]))["value"]["version"]=="0.1.0","version")
 check(dispatch("export",opts(["--state",root]))["value"]["schema_version"]=="1.0.0","export")
 if id!=""{check(dispatch("show",opts(["--state",root,"--id",id]))["ok"],"show")}
 source:=root+"/package.bin";output:=root+"/published/package.bin";write_file(source,"approved package",true)
-approval_path:=root+"/approval.json";write_file(approval_path,to_json({"schema_version":"1.0.0","tool_version":"0.1.0","id":"approval-fixture","command":"approve","payload":{"manifest_checksum":sha256_file(source),"destination":"fixture-local","action":"publish"}}),true)
+approval_path:=root+"/approval.json";write_file(approval_path,to_json({"schema_version":"1.0.0","tool_version":"0.1.0","contract_version":"1.0.0","id":"approval-fixture","record_type":"decision","command":"approve","actor":"fixture-approver","created_at":"2026-08-14T00:00:00Z","payload":{"human_actor":"fixture-approver","manifest_checksum":sha256_file(source),"destination":"fixture-local","action":"publish"}}),true)
 request_path:=root+"/publish.json";write_file(request_path,to_json({"schema_version":"1.0.0","approval_id":"approval-fixture","approval_record_path":approval_path,"manifest_checksum":sha256_file(source),"destination":"fixture-local","authorized_action":"publish","provenance":[]}),true)
 base:=["--state",root,"--input",request_path,"--actor","publisher","--path",source,"--output",output,"--act","--yes"]
 check(!dispatch("publish",opts(["--state",root,"--input",request_path,"--actor","publisher","--path",source,"--output",output]))["ok"],"ACT requires confirmation")
