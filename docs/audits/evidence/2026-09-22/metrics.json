@@ -1,0 +1,47 @@
+{
+  "export": {
+    "records": 100,
+    "payload_bytes_each": 4096,
+    "before_stdout_bytes": 434800,
+    "after_receipt_bytes": 142,
+    "record_arrays_equal": true
+  },
+  "publication": {
+    "count": 5,
+    "artifact_bytes": 4194304,
+    "before": {
+      "elapsed_s": 1.2,
+      "user_s": 0.71,
+      "system_s": 0.13,
+      "rss_bytes": 27803648
+    },
+    "after": {
+      "elapsed_s": 1.78,
+      "user_s": 0.86,
+      "system_s": 0.24,
+      "rss_bytes": 40321024
+    },
+    "caveat": "Single samples. After overlaps runtime compilation and other host load; no speed claim."
+  },
+  "json_validation_processes": {
+    "before": 7,
+    "after": 1
+  },
+  "baseline_sha": "566469012efbf10e86d48f61fdd64cdd050dddd6",
+  "implementation_sha": "321153c7bba6f5c78f35e49af073441429a046b3",
+  "raw_artifact_sha256": {
+    "export-before.json": "4d49e4164f461e9c29fbbfd83c97339468799ec236f1445a0816b4b1e5be404f",
+    "export-after.json": "393eb5699ec3d9151b7738a9ce32c0b5bca67ae90605973ad19a8fe8411545c1",
+    "publication-before.log": "11ce25cdcca6ec8632d9f9f201b89d9b2d8164cbb4765f8192ae429a3aaeadf0",
+    "publication-after.log": "518ae084d364efb5bfabef0aaf563e2c012726629c1187e802ef8fc96788fbd9",
+    "export-file-after.json": "9a9f0f4942a64c48d02baf6ef1b16ce0218b477f9b1c71797c32b31a199f5c36",
+    "dependencies-default.txt": "483827b073c88bb76757a8bf9aa1aac14edd0d4af12b6308fda520d9de1d3f56",
+    "dependencies-minimal.txt": "0c189fa143762732200612e117a32b852de8285bb437d6cdca28242883972e53",
+    "pinned-minimal-build.log": "4f0bccbc3e6d204a750afb6479cd056b6557480c7a6c9f408af8d5b81fab780f"
+  },
+  "pinned_runtime_graph_packages": {
+    "default_features": 408,
+    "no_default_features": 274,
+    "scope": "host graph including root, build and dev packages; distinct cargo tree package lines"
+  }
+}

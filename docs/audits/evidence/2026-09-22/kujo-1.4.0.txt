@@ -1,0 +1,13 @@
+check passed: presswire.kujo
+19 passed; 0 failed
+7 passed; 0 failed
+4 passed; 0 failed
+4 passed; 0 failed
+18 passed; 0 failed
+36 passed; 0 failed
+9 passed; 0 failed
+2 passed; 0 failed (16 competing processes)
+presswire validation passed.
+real 17.59
+user 9.79
+sys 4.79
