@@ -79,3 +79,11 @@ export func bounded_int(value, fallback, minimum, maximum) {
 export func envelope(ok, data, error, code, version, contract) {
     return {"ok": ok, "data": data, "error": error, "error_code": code, "tool_version": version, "contract_version": contract}
 }
+
+// Base64 is ASCII: recover the exact UTF-8 byte length without character-count ambiguity.
+export func utf8_size(text) {
+    encoded := encode_base64(text)
+    mut padding := 0
+    if ends_with(encoded,"==") { padding=2 } else if ends_with(encoded,"=") { padding=1 }
+    return to_int(len(encoded)/4)*3-padding
+}

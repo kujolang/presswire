@@ -1,4 +1,4 @@
-from src.common import get, parse_object, safe_id
+from src.common import get, parse_object, safe_id, utf8_size
 
 func ensure_tree(path) {
     if path == "" || path == "." { return "" }
@@ -69,7 +69,7 @@ export func save_new(state, record) {
     if path_is_file(path) { release_lock(lock["path"]); return {"ok": false, "code": "duplicate_id", "error": "record already exists: " + id} }
     if file_exists(path) && path_is_symlink(path) { release_lock(lock["path"]); return {"ok": false, "code": "symlink_escape", "error": "record symlinks are not allowed"} }
     serialized := to_json_pretty(record) + "\n"
-    if len(serialized) > 1048576 { release_lock(lock["path"]); return {"ok": false, "code": "record_too_large", "error": "serialized record exceeds 1 MiB"} }
+    if utf8_size(serialized) > 1048576 { release_lock(lock["path"]); return {"ok": false, "code": "record_too_large", "error": "serialized record exceeds 1 MiB"} }
     checksum := sha256(serialized)
     event := {"schema_version": "1.0.0", "event": "record.created", "record_id": id, "actor": record["actor"], "at": record["created_at"], "record_sha256": checksum}
     event_path := join_path(history_dir(state), substring(sha256(record["created_at"] + "\n" + id), 0, 32) + ".json")
@@ -110,7 +110,7 @@ export func list_records(state, kind, after, limit) {
             loaded := load_record(state, id)
             if loaded["ok"] {
                 record := loaded["value"]
-                if kind == "" || get(record, "record_type", "") == kind { record_bytes := len(to_json(record)); if total_bytes + record_bytes > 8388608 { truncated = true; break }; records = push(records, record); total_bytes = total_bytes + record_bytes }
+                if kind == "" || get(record, "record_type", "") == kind { record_bytes := utf8_size(to_json(record)); if total_bytes + record_bytes > 8388608 { truncated = true; break }; records = push(records, record); total_bytes = total_bytes + record_bytes }
             } else { warnings = push(warnings, {"id": id, "code": loaded["code"], "error": loaded["error"]}) }
             next_after = id
         }
@@ -120,7 +120,7 @@ export func list_records(state, kind, after, limit) {
 
 export func check_new(state, record) {
     if !safe_id(get(record, "id", "")) { return {"ok": false, "code": "unsafe_id", "error": "unsafe record id"} }
-    if len(to_json_pretty(record) + "\n") > 1048576 { return {"ok": false, "code": "record_too_large", "error": "serialized record exceeds 1 MiB"} }
+    if utf8_size(to_json_pretty(record) + "\n") > 1048576 { return {"ok": false, "code": "record_too_large", "error": "serialized record exceeds 1 MiB"} }
     event_path := join_path(history_dir(state), substring(sha256(record["created_at"] + "\n" + record["id"]), 0, 32) + ".json")
     if file_exists(event_path) { return {"ok": false, "code": "history_conflict", "error": "audit history event already exists"} }
     return {"ok": true}

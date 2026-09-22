@@ -2,7 +2,7 @@ from tests.support import test_root
 from src.core import dispatch, main
 from src.args import parse_args
 from src.storage import acquire_lock, acquire_operation_lock, release_lock, list_records
-from src.common import bounded_int, valid_timestamp
+from src.common import bounded_int, valid_timestamp, utf8_size
 mut passed := 0
 mut failed := 0
 func check(ok,label) { if ok { passed=passed+1 } else { failed=failed+1; eprint("FAIL: "+label) } }
@@ -84,5 +84,11 @@ unsafe_cursor:=dispatch("report",opts(["--state",corrupt_state,"--after","zz_bad
 check(unsafe_cursor["ok"],"corrupt filename cursor remains consumable")
 check(!valid_timestamp("2026-02-29T00:00:00Z")&&!valid_timestamp("2026-04-31T00:00:00Z"),"impossible calendar dates rejected")
 check(valid_timestamp("2024-02-29T00:00:00.123Z"),"leap-year timestamp accepted")
+check(utf8_size("é😀")==6,"UTF-8 byte accounting")
+mut unicode_text := "é"
+for n in range(0,18) { unicode_text=unicode_text+unicode_text }
+write_file(root+"/unicode-input",to_json({"schema_version":"1.0.0","provenance":[unicode_text]}),true)
+unicode_record := dispatch("preflight",opts(["--state",state,"--input",root+"/unicode-input","--actor","reader","--id","publication-unicode"]))
+check(!unicode_record["ok"]&&unicode_record["code"]=="record_too_large"&&!file_exists(state+"/records/publication-unicode.json"),"Unicode cannot persist an unreadable oversized record")
 print(to_string(passed)+" passed; "+to_string(failed)+" failed")
 if failed>0 { exit(1) }
