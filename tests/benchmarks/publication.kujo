@@ -1,0 +1,20 @@
+from tests.support import test_root
+from src.core import dispatch
+from src.args import parse_args
+root := test_root("benchmark")
+create_dir(root)
+mut content := "0123456789abcdef"
+for n in range(0, 18) { content = content + content }
+source := root + "/source"
+write_file(source, content, true)
+digest := sha256_file(source)
+approval := {"schema_version":"1.0.0","tool_version":"0.1.0","contract_version":"1.0.0","id":"approval-benchmark","record_type":"decision","command":"approve","actor":"benchmark","created_at":"2026-08-14T00:00:00Z","payload":{"human_actor":"benchmark","manifest_checksum":digest,"destination":"local","action":"publish"}}
+write_file(root+"/approval",to_json(approval),true)
+write_file(root+"/input",to_json({"schema_version":"1.0.0","approval_id":"approval-benchmark","approval_record_path":root+"/approval","manifest_checksum":digest,"destination":"local","authorized_action":"publish"}),true)
+for n in range(0, 5) {
+    options := parse_args(["--state",root+"/state-"+to_string(n), "--input",root+"/input","--actor","benchmark","--path",source,"--output",root+"/output","--id","publication-benchmark-"+to_string(n),"--act","--yes","--force"],["act","yes","force"])
+    result := dispatch("publish",options)
+    if !result["ok"] { eprint(to_json(result)); exit(1) }
+    if sha256_file(root+"/output") != digest { exit(1) }
+}
+print("5 publications x 4194304 bytes verified")

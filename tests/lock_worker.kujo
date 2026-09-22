@@ -1,0 +1,5 @@
+from src.storage import acquire_lock
+parameters:=args()
+lock:=acquire_lock(parameters[0],"race-lock")
+if lock["ok"] { write_file(parameters[0]+"/winner-"+parameters[1],"winner",true) }
+// Leave the lock held until all competitors finish; the parent owns cleanup.

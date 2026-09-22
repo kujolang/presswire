@@ -1,0 +1,22 @@
+from tests.support import test_root
+mut passed:=0;mut failed:=0
+func check(ok,label){if ok{passed=passed+1}else{failed=failed+1;eprint("FAIL: "+label)}}
+func run_cli(values){return spawn_process(concat(["./bin/presswire"],values),{"timeout_ms":10000,"max_output_bytes":65536})}
+version:=run_cli(["--version","--json"])
+check(version.exitcode==0&&parse_json(version.stdout)["data"]["version"]=="0.2.0","version alias preserves JSON flag")
+missing:=run_cli(["report","--state"]);check(missing.exitcode==2&&contains(missing.stderr,"missing value"),"missing flag value is usage error")
+unknown:=run_cli(["report","--no-such-flag"]);check(unknown.exitcode==2,"unknown flag usage error")
+duplicate:=run_cli(["report","--json","--json"]);check(duplicate.exitcode==2,"duplicate flag usage error")
+invalid:=run_cli(["report","--limit","99999999999999999999999999999","--json"])
+check(invalid.exitcode==1&&parse_json(invalid.stdout)["error_code"]=="out_of_range","invalid numeric envelope and exit")
+root := test_root("cli_test");create_dir(root)
+created:=run_cli(["preflight","--state",root,"--actor","cli-test","--id","publication-cli","--json"])
+check(created.exitcode==0&&parse_json(created.stdout)["ok"],"CLI create")
+page:=run_cli(["report","--state",root,"--type","preflight","--limit","1","--json"])
+check(page.exitcode==0&&len(parse_json(page.stdout)["data"]["records"])==1,"CLI documented list flags")
+exported:=run_cli(["export","--state",root,"--output",root+"/export.json","--json"])
+check(exported.exitcode==0&&file_exists(root+"/export.json"),"CLI export output")
+// The launcher must find an installed runtime without a developer-specific path.
+launcher:=spawn_process(["sh","-c","unset KUJO_BIN; PATH=\"$(dirname \"$1\"):$PATH\"; export PATH; exec ./bin/presswire --version --json","presswire-test",env("KUJO_BIN")],{"timeout_ms":10000,"max_output_bytes":65536})
+check(launcher.exitcode==0&&parse_json(launcher.stdout)["ok"],"launcher PATH discovery")
+print(to_string(passed)+" passed; "+to_string(failed)+" failed");if failed>0{exit(1)}

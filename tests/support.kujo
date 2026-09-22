@@ -1,0 +1,7 @@
+export func test_root(label) {
+    parent := env("PRESSWIRE_TEST_ROOT")
+    if parent=="" { parent="tests/tmp" }
+    root := join_path(parent,label+"-"+uuid_v4())
+    create_dir(root)
+    return root
+}

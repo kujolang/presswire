@@ -20,7 +20,7 @@ jobs:
         with:
           toolchain: stable
       - name: Build pinned Kujo runtime
-        run: cargo build --release --manifest-path .runtime/kujo/Cargo.toml
+        run: cargo build --release --locked --manifest-path .runtime/kujo/Cargo.toml
       - name: Validate
         env:
           KUJO_BIN: ${{ github.workspace }}/.runtime/kujo/target/release/kujo

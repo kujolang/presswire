@@ -1,0 +1,16 @@
+from src.core import dispatch
+from src.args import parse_args
+from tests.support import test_root
+root := test_root("export-benchmark")
+options := parse_args(["--state",root],[])
+if !dispatch("init",options)["ok"] { exit(1) }
+mut payload_text := "0123456789abcdef"
+for n in range(0,8) { payload_text=payload_text+payload_text }
+for n in range(0,100) {
+    id := "publication-benchmark-"+to_string(n)
+    record := {"schema_version":"1.0.0","tool_version":"0.2.0","contract_version":"1.0.0","id":id,"record_type":"preflight","command":"preflight","actor":"benchmark","created_at":"2026-08-14T00:00:00Z","provenance":[],"payload":{"text":payload_text}}
+    write_file(root+"/records/"+id+".json",to_json(record),true)
+}
+result := dispatch("export",parse_args(["--state",root,"--output",root+"/export.json"],[]))
+if !result["ok"] { exit(1) }
+print(to_json(result))

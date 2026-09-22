@@ -1,0 +1,14 @@
+from tests.support import test_root
+from src.storage import initialize, acquire_lock, release_lock
+root := test_root("concurrency_test")
+initialized:=initialize(root,{"tool":"presswire","contract_version":"1.0.0"})
+if !initialized["ok"]{exit(1)}
+// Positional arguments keep paths out of shell syntax. No sleeps or time-based assertions.
+workers:=spawn_process(["sh","-c","i=0; pids=; while [ \"$i\" -lt 16 ]; do \"$1\" run tests/lock_worker.kujo -- \"$2\" \"$i\" & pids=\"$pids $!\"; i=$((i+1)); done; code=0; for pid in $pids; do wait \"$pid\" || code=1; done; exit \"$code\"","presswire-race",env("KUJO_BIN"),root],{"timeout_ms":30000,"max_output_bytes":65536})
+if workers.exitcode!=0{eprint(workers.stderr);exit(1)}
+mut winners:=0
+for name in list_dir(root){if starts_with(name,"winner-"){winners=winners+1}}
+if winners!=1{eprint("expected exactly one lock owner, got "+to_string(winners));exit(1)}
+release_lock(root+"/locks/race-lock.lock")
+retry:=acquire_lock(root,"race-lock");if !retry["ok"]{exit(1)};release_lock(retry["path"])
+print("2 passed; 0 failed (16 competing processes)")

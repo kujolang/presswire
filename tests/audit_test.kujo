@@ -1,0 +1,88 @@
+from tests.support import test_root
+from src.core import dispatch, main
+from src.args import parse_args
+from src.storage import acquire_lock, acquire_operation_lock, release_lock, list_records
+from src.common import bounded_int, valid_timestamp
+mut passed := 0
+mut failed := 0
+func check(ok,label) { if ok { passed=passed+1 } else { failed=failed+1; eprint("FAIL: "+label) } }
+func opts(values) { return parse_args(values,["json","dry-run","force","act","yes"]) }
+root := test_root("audit_test")
+create_dir(root)
+state := root+"/state"
+check(dispatch("init",opts(["--state",state]))["ok"],"initialize")
+source := root+"/source"
+write_file(source,"approved bytes",true)
+approval := {"schema_version":"1.0.0","tool_version":"0.1.0","contract_version":"1.0.0","id":"approval-audit","record_type":"decision","command":"approve","actor":"approver","created_at":"2026-08-14T00:00:00Z","payload":{"human_actor":"approver","manifest_checksum":sha256_file(source),"destination":"local","action":"publish","output_path":root+"/new/output"}}
+write_file(root+"/approval",to_json(approval),true)
+write_file(root+"/input",to_json({"schema_version":"1.0.0","approval_id":"approval-audit","approval_record_path":root+"/approval","manifest_checksum":sha256_file(source),"destination":"local","authorized_action":"publish"}),true)
+base := ["--state",state,"--input",root+"/input","--actor","publisher","--path",source,"--output",root+"/new/output","--act","--yes","--id","publication-explicit","--timestamp","2026-08-15T00:00:00Z"]
+locked := acquire_operation_lock(state)
+check(locked["ok"],"operation lock acquired")
+blocked := dispatch("publish",opts(base))
+check(!blocked["ok"]&&blocked["code"]=="write_conflict"&&!file_exists(root+"/new"),"held lock prevents effect")
+release_lock(locked["path"])
+preview := dispatch("publish",opts(concat(base,["--dry-run"])))
+check(preview["ok"]&&!file_exists(root+"/new"),"dry-run creates no output parents")
+check(preview["ok"]&&preview["value"]["record"]["id"]=="publication-explicit","approval parsing preserves explicit id")
+check(preview["ok"]&&preview["value"]["record"]["created_at"]=="2026-08-15T00:00:00Z","approval parsing preserves timestamp")
+event_path := state+"/history/"+substring(sha256("2026-08-15T00:00:00Z\npublication-explicit"),0,32)+".json"
+write_file(event_path,"{}",true)
+conflict := dispatch("publish",opts(base))
+check(!conflict["ok"]&&conflict["code"]=="history_conflict"&&!file_exists(root+"/new/output"),"history conflict detected before delivery")
+delete_file(event_path)
+wrong_payload := approval["payload"]; wrong_payload["output_path"] = root+"/elsewhere"; approval["payload"] = wrong_payload
+write_file(root+"/approval",to_json(approval),true)
+wrong := dispatch("publish",opts(base))
+check(!wrong["ok"]&&wrong["code"]=="authorization_failed","concrete approval output bound")
+right_payload := approval["payload"]; right_payload["output_path"] = root+"/new/output"; approval["payload"] = right_payload
+write_file(root+"/approval",to_json(approval),true)
+published := dispatch("publish",opts(base))
+check(published["ok"]&&sha256_file(root+"/new/output")==sha256_file(source),"approved snapshot delivered")
+check(!dispatch("publish",opts(base))["ok"],"same id cannot repeat effect")
+// An input below 1 MiB can expand beyond the record bound when pretty printed.
+mut padding := "xxxxxxxxxxxxxxxx"
+for n in range(0,16) { padding=padding+padding }
+padding=substring(padding,0,1048000)
+large_input := {"schema_version":"1.0.0","approval_id":"approval-audit","approval_record_path":root+"/approval","manifest_checksum":sha256_file(source),"destination":"local","authorized_action":"publish","padding":padding}
+write_file(root+"/large",to_json(large_input),true)
+check(file_size(root+"/large")<1048576,"oversized record fixture is valid-size input")
+large_approval_payload := approval["payload"]; large_approval_payload["output_path"] = root+"/oversized-output"; approval["payload"] = large_approval_payload
+write_file(root+"/approval",to_json(approval),true)
+large_result := dispatch("publish",opts(["--state",state,"--input",root+"/large","--actor","publisher","--path",source,"--output",root+"/oversized-output","--id","publication-large","--act","--yes","--force"]))
+check(!large_result["ok"]&&large_result["code"]=="record_too_large"&&!file_exists(root+"/oversized-output"),"expanded record rejected before delivery")
+for suffix in ["one","two","three"] { check(dispatch("preflight",opts(["--state",state,"--actor","reader","--id","publication-"+suffix]))["ok"],"query fixture "+suffix) }
+page := dispatch("report",opts(["--state",state,"--type","preflight","--limit","1"]))
+check(page["ok"]&&len(page["value"]["records"])==1&&page["value"]["truncated"],"bounded filtered page")
+next_page := dispatch("report",opts(["--state",state,"--type","preflight","--limit","1","--after",page["value"]["next_after"]]))
+check(next_page["ok"]&&len(next_page["value"]["records"])==1&&next_page["value"]["records"][0]["id"]!=page["value"]["records"][0]["id"],"cursor advances without duplicate")
+check(!dispatch("report",opts(["--state",state,"--limit","999999999999999999999999999999999"]))["ok"],"huge integer is structured failure")
+write_file(root+"/config",to_json({"state":state,"limit":1}),true)
+configured := dispatch("report",opts(["--config",root+"/config"]))
+check(configured["ok"]&&len(configured["value"]["records"])==1,"config limit applied")
+write_file(root+"/bad-config",to_json({"state":12}),true)
+check(!dispatch("init",opts(["--config",root+"/bad-config"]))["ok"],"config type checked")
+exported := dispatch("export",opts(["--state",state,"--output",root+"/export.json"]))
+check(exported["ok"]&&len(parse_json(read_file(root+"/export.json"))["records"])==4,"file export written")
+check(!dispatch("export",opts(["--state",state,"--output",root+"/export.json"]))["ok"],"export no overwrite")
+check(!dispatch("export",opts(["--state",state,"--limit","1","--output",root+"/partial.json"]))["ok"]&&!file_exists(root+"/partial.json"),"partial file export rejected")
+corrupt_state := root+"/corrupt"
+check(dispatch("init",opts(["--state",corrupt_state]))["ok"],"corrupt fixture initialized")
+for n in range(0,1005) { write_file(corrupt_state+"/records/publication-bad-"+to_string(n)+".json","{",true) }
+warnings := list_records(corrupt_state,"","",1000)
+check(len(warnings["warnings"])==1000&&warnings["truncated"],"corrupt scans and warnings bounded")
+remaining := list_records(corrupt_state,"",warnings["next_after"],1000)
+check(len(remaining["warnings"])==5&&!remaining["truncated"],"warning cursor loses no records")
+check(dispatch("preflight",opts(["--state",state,"--actor","reader","--id","publication-operations"]))["ok"],"operation lock cannot collide with record id")
+for suffix in ["prefix","prefix-child"] { check(dispatch("preflight",opts(["--state",state,"--actor","reader","--id","publication-"+suffix]))["ok"],"prefix fixture "+suffix) }
+prefix_page:=dispatch("report",opts(["--state",state,"--after","publication-pre","--limit","1"]))
+check(prefix_page["value"]["records"][0]["id"]=="publication-prefix","bare ids sort before their children")
+prefix_next:=dispatch("report",opts(["--state",state,"--after",prefix_page["value"]["next_after"],"--limit","1"]))
+check(prefix_next["value"]["records"][0]["id"]=="publication-prefix-child","prefix cursor does not skip child")
+write_file(corrupt_state+"/records/zz_bad.json","{",true)
+unsafe_cursor:=dispatch("report",opts(["--state",corrupt_state,"--after","zz_bad"]))
+check(unsafe_cursor["ok"],"corrupt filename cursor remains consumable")
+check(!valid_timestamp("2026-02-29T00:00:00Z")&&!valid_timestamp("2026-04-31T00:00:00Z"),"impossible calendar dates rejected")
+check(valid_timestamp("2024-02-29T00:00:00.123Z"),"leap-year timestamp accepted")
+print(to_string(passed)+" passed; "+to_string(failed)+" failed")
+if failed>0 { exit(1) }

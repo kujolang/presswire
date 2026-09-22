@@ -159,3 +159,6 @@ Thumbs.db
 # /fence.toml
 # /.lens.toml
 # /packwrite.toml
+
+# Local audit logs, runtime builds and memory staging
+/.audit-artifacts/

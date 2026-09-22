@@ -1,6 +1,6 @@
 from src.args import parse_args
-from src.common import get, has, valid_timestamp, find_sensitive_key, canonical_json, parse_object, safe_id, envelope
-from src.storage import initialize, save_new, load_record, list_records, validate_state_path
+from src.common import get, has, valid_timestamp, find_sensitive_key, canonical_json, parse_object, safe_id, envelope, bounded_int
+from src.storage import initialize, save_new, load_record, list_records, validate_state_path, acquire_operation_lock, release_lock, check_new
 
 SLUG := "presswire"
 NAME := "PressWire"
@@ -20,7 +20,13 @@ func load_config(path) {
     if !path_is_file(path) || path_is_symlink(path) { return {"ok": false, "code": "config_not_found", "error": "config must be a regular non-symlink file"} }
     if file_size(path) > 65536 { return {"ok": false, "code": "config_too_large", "error": "config exceeds 64 KiB"} }
     parsed := parse_object(read_file(path), "config"); if !parsed["ok"] { return parsed }
-    for key in keys(parsed["value"]) { if !has(["state","actor"], key) { return {"ok": false, "code": "unknown_config_key", "error": "unknown config key: " + key} } }
+    for key in keys(parsed["value"]) { if !has(["state","actor","limit"], key) { return {"ok": false, "code": "unknown_config_key", "error": "unknown config key: " + key} } }
+    for key in ["state","actor"] {
+        if has_key(parsed["value"],key)==1 && (type(parsed["value"][key])!="string" || trim(parsed["value"][key])=="") { return {"ok":false,"code":"invalid_config","error":key+" must be a nonempty string"} }
+    }
+    if has_key(parsed["value"],"limit")==1 && type(parsed["value"]["limit"])!="int" { return {"ok":false,"code":"invalid_config","error":"limit must be an integer"} }
+    checked_limit := bounded_int(get(parsed["value"],"limit",null),1000,1,1000)
+    if !checked_limit["ok"] { return checked_limit }
     return parsed
 }
 
@@ -57,12 +63,12 @@ func validate_effect(command, payload, parsed) {
     return ""
 }
 
-func validate_approval(command, payload) {
+func validate_approval(command, payload, requested_output) {
     if !has(EFFECT_COMMANDS, command) { return "" }
     path := payload["approval_record_path"]
     if !path_is_file(path) || path_is_symlink(path) || file_size(path) > 1048576 { return "VersionSeal approval record must be a bounded regular file" }
-    parsed := parse_object(read_file(path), "VersionSeal approval record"); if !parsed["ok"] { return "invalid VersionSeal approval record" }
-    record := parsed["value"]
+    approval_result := parse_object(read_file(path), "VersionSeal approval record"); if !approval_result["ok"] { return "invalid VersionSeal approval record" }
+    record := approval_result["value"]
     if get(record,"id","") != payload["approval_id"] || get(record,"command","") != "approve" || get(record,"record_type","") != "decision" { return "approval identity mismatch" }
     if get(record,"schema_version","") != "1.0.0" || get(record,"contract_version","") != "1.0.0" || !has(["0.1.0","0.2.0"],get(record,"tool_version","")) { return "approval contract mismatch" }
     if !valid_timestamp(get(record,"created_at","")) || type(get(record,"actor",null)) != "string" || trim(record["actor"]) == "" { return "approval provenance is invalid" }
@@ -70,6 +76,10 @@ func validate_approval(command, payload) {
     if type(approved) != "dict" || get(approved,"human_actor","") != record["actor"] { return "approval actor binding mismatch" }
     if get(approved,"manifest_checksum","") != payload["manifest_checksum"] { return "approval checksum scope mismatch" }
     if get(approved,"destination","") != payload["destination"] || get(approved,"action","") != command { return "approval destination or action scope mismatch" }
+    approved_output := get(approved,"output_path",null)
+    if type(approved_output)!="null" {
+        if type(approved_output)!="string" || approved_output=="" || approved_output!=requested_output { return "approval output path scope mismatch" }
+    }
     return ""
 }
 
@@ -97,31 +107,35 @@ func ensure_output_parent(path) {
     return ""
 }
 
-func publish_local(record, payload, source, output, force, dry_run) {
+func publish_local(state, record, payload, source, output, force, dry_run) {
     if source==""||output=="" { return {"ok":false,"code":"publish_paths_required","error":"local publish requires --path source and --output destination"} }
     if !path_is_file(source)||path_is_symlink(source)||file_size(source)>67108864 { return {"ok":false,"code":"unsafe_artifact","error":"publication source must be a bounded regular file"} }
-    if sha256_file(source)!=payload["manifest_checksum"] { return {"ok":false,"code":"checksum_drift","error":"checksum drift detected"} }
+    artifact_bytes := read_binary_file(source)
+    if len(artifact_bytes)>67108864 { return {"ok":false,"code":"unsafe_artifact","error":"publication source exceeds 64 MiB"} }
+    artifact_digest := sha256(artifact_bytes)
+    if artifact_digest!=payload["manifest_checksum"] { return {"ok":false,"code":"checksum_drift","error":"checksum drift detected"} }
     if source==output { return {"ok":false,"code":"unsafe_output","error":"publication source and destination must differ"} }
     for part in split(replace_str(output,"\\","/"),"/"){if part==".."{return {"ok":false,"code":"unsafe_output","error":"publication path traversal is not allowed"}}}
-    parent_error:=ensure_output_parent(output);if parent_error!=""{return {"ok":false,"code":"unsafe_output","error":parent_error}}
+
     if file_exists(output)&&path_is_symlink(output){return {"ok":false,"code":"unsafe_output","error":"publication destination symlinks are not allowed"}}
     if file_exists(output)&&force!=true{return {"ok":false,"code":"output_exists","error":"publication destination exists"}}
-    record["artifact"]={"path":source,"sha256":sha256_file(source),"bytes":file_size(source)}
+    record["artifact"]={"path":source,"sha256":artifact_digest,"bytes":len(artifact_bytes)}
     record["receipt"]={"schema_version":"1.0.0","adapter":"local-filesystem","adapter_version":"0.2.0","provider_id":record["id"],"url":"file:"+output,"idempotency_key":substring(sha256(record["id"]),0,32),"status":"published"}
+    ready := check_new(state, record)
+    if !ready["ok"] { return ready }
     if dry_run==true{return {"ok":true,"record":record}}
-    temporary:=output+".tmp-"+uuid_v4()
-    try { copy_file(source,temporary); rename_file(temporary,output) } except error { if path_is_file(temporary){delete_file(temporary)};return {"ok":false,"code":"publish_failed","error":"atomic local publication failed"} }
+    parent_error:=ensure_output_parent(output);if parent_error!=""{return {"ok":false,"code":"unsafe_output","error":parent_error}}
+    try { write_file_atomic(output,artifact_bytes,force) } except error { return {"ok":false,"code":"publish_failed","error":"atomic local publication failed; destination may already exist"} }
     return {"ok":true,"record":record}
 }
 
-func create_record(command, parsed, config) {
+func create_record_locked(command, parsed, config) {
     source_flag:=flag(parsed,"path","");output_flag:=flag(parsed,"output","");force_flag:=flag(parsed,"force",false);dry_run_flag:=flag(parsed,"dry-run",false)
     state := setting(parsed,config,"state",DEFAULT_STATE)
-    initialized:=initialize(state,metadata());if !initialized["ok"]{return initialized}
     input:=read_payload(parsed);if !input["ok"]{return input};payload:=input["value"]
     actor:=setting(parsed,config,"actor","")
     if type(actor)!="string"||trim(actor)==""||len(actor)>256||!regex_match(actor,"^[^\\x00-\\x1F\\x7F]+$"){return {"ok":false,"code":"actor_required","error":"mutating commands require a bounded printable actor"}}
-    error:=validate_effect(command,payload,parsed);if error==""{error=validate_approval(command,payload)};if error!=""{return {"ok":false,"code":"authorization_failed","error":error}}
+    error:=validate_effect(command,payload,parsed);if error==""{error=validate_approval(command,payload,output_flag)};if error!=""{return {"ok":false,"code":"authorization_failed","error":error}}
     timestamp:=flag(parsed,"timestamp",now_utc());if !valid_timestamp(timestamp){return {"ok":false,"code":"invalid_timestamp","error":"timestamp must be RFC 3339 UTC"}}
     id:=flag(parsed,"id","")
     if id=="" { if has(EFFECT_COMMANDS,command){id="publication-"+substring(sha256(payload["approval_id"]+"\n"+command+"\n"+payload["destination"]+"\n"+payload["manifest_checksum"]),0,20)}else{id="publication-"+substring(sha256(SLUG+"\n"+command+"\n"+actor+"\n"+timestamp+"\n"+canonical_json(payload)),0,20)} }
@@ -130,18 +144,33 @@ func create_record(command, parsed, config) {
     if existing["ok"]{return {"ok":false,"code":"duplicate_id","error":"publication record already exists: "+id}}
     if get(existing,"code","")!="not_found"{return existing}
     record:={"schema_version":"1.0.0","tool_version":VERSION,"contract_version":CONTRACT,"id":id,"record_type":command,"command":command,"actor":actor,"created_at":timestamp,"provenance":get(payload,"provenance",[]),"payload":payload}
-    if command=="publish"{published:=publish_local(record,payload,source_flag,output_flag,force_flag,dry_run_flag);if !published["ok"]{return published};record=published["record"]}
+    if command=="publish"{published:=publish_local(state,record,payload,source_flag,output_flag,force_flag,dry_run_flag);if !published["ok"]{return published};record=published["record"]}
     else { path:=flag(parsed,"path","");if path!=""{if !path_is_file(path)||path_is_symlink(path)||file_size(path)>67108864{return {"ok":false,"code":"unsafe_artifact","error":"artifact must be a bounded regular file"}};record["artifact"]={"path":path,"sha256":sha256_file(path),"bytes":file_size(path)} } }
     if dry_run_flag==true{return {"ok":true,"value":{"dry_run":true,"record":record}}}
-    stored:=save_new(state,record);if !stored["ok"]{return stored}
+    stored:=save_new(state,record);if !stored["ok"]{
+        if command=="publish" { return {"ok":false,"code":"publication_unrecorded","error":"artifact was published but receipt persistence failed; inspect destination before retrying","value":{"record":record,"storage_error_code":get(stored,"code","write_failed")}} }
+        return stored
+    }
     return {"ok":true,"value":record}
+}
+
+func create_record(command, parsed, config) {
+    state := setting(parsed,config,"state",DEFAULT_STATE)
+    initialized := initialize(state,metadata()); if !initialized["ok"] { return initialized }
+    operation_lock := acquire_operation_lock(state); if !operation_lock["ok"] { return operation_lock }
+    mut result := null
+    try { result = create_record_locked(command,parsed,config) }
+    except error { result = {"ok":false,"code":"operation_failed","error":"publication operation failed: "+to_string(error)+"; inspect state and destination before retrying"} }
+    try { release_lock(operation_lock["path"]) }
+    except error { return {"ok":false,"code":"lock_cleanup_failed","error":"operation completed but lock cleanup failed; inspect state before removing the stale lock","value":get(result,"value",null)} }
+    return result
 }
 
 func verify(parsed,config) {
     state:=setting(parsed,config,"state",DEFAULT_STATE);id:=flag(parsed,"id","");if id==""{return {"ok":false,"code":"id_required","error":"validation requires --id"}}
     loaded:=load_record(state,id);if !loaded["ok"]{return loaded};record:=loaded["value"]
     if !has(["0.1.0","0.2.0"],get(record,"tool_version",""))||get(record,"contract_version","")!="1.0.0"{return {"ok":false,"code":"incompatible_record","error":"record tool or contract version is incompatible"}}
-    path:=flag(parsed,"path","");if path!=""{expected:=get(get(record,"artifact",{}),"sha256",get(record["payload"],"manifest_checksum",""));if !path_is_file(path)||path_is_symlink(path)||expected==""||sha256_file(path)!=expected{return {"ok":false,"code":"checksum_drift","error":"checksum drift detected"}}}
+    path:=flag(parsed,"path","");if path!=""{expected:=get(get(record,"artifact",{}),"sha256",get(record["payload"],"manifest_checksum",""));if !path_is_file(path)||path_is_symlink(path)||file_size(path)>67108864||expected==""||sha256_file(path)!=expected{return {"ok":false,"code":"checksum_drift","error":"checksum drift detected"}}}
     return {"ok":true,"value":{"valid":true,"record_id":record["id"],"checksum":loaded["checksum"]}}
 }
 
@@ -154,29 +183,51 @@ export func dispatch(command,parsed) {
         if state_error==""{listing=list_records(state,"","",1000)}
         healthy:=state_error==""&&len(listing["warnings"])==0;mut code:=null;mut error:=null
         if !healthy{code="corrupt_state";error="state is unsafe or contains unreadable records"}
-        return {"ok":healthy,"code":code,"error":error,"value":{"healthy":healthy,"state":state,"record_count":len(listing["records"]),"corrupt_records":listing["warnings"],"limits":{"input_bytes":1048576,"artifact_bytes":67108864,"list_records":1000},"limitations":"Local publication cannot be transactionally coupled to state on a different filesystem; failures are reported and never retried implicitly."}}
+        return {"ok":healthy,"code":code,"error":error,"value":{"healthy":healthy,"state":state,"record_count":len(listing["records"]),"corrupt_records":listing["warnings"],"truncated":get(listing,"truncated",false),"next_after":get(listing,"next_after",""),"limits":{"input_bytes":1048576,"artifact_bytes":67108864,"list_records":1000},"limitations":"Local publication cannot be transactionally coupled to state on a different filesystem; failures are reported and never retried implicitly."}}
     }
     if command=="adapters"||command=="capabilities"{return {"ok":true,"value":{"adapters":[{"id":"local-filesystem","version":"0.2.0","effects":["publish"],"offline":true}],"requires_confirmation":EFFECT_COMMANDS}}}
     if command=="show"||command=="receipt"{id:=flag(parsed,"id","");if id==""{return {"ok":false,"code":"id_required","error":"show requires --id"}};return load_record(state,id)}
     if command=="validate"||command=="status"{return verify(parsed,config)}
-    if command=="history"||command=="report"{listing:=list_records(state,"","",1000);if len(listing["warnings"])>0&&listing["warnings"][0]["code"]=="unsafe_state"{return {"ok":false,"code":"unsafe_state","error":listing["warnings"][0]["error"]}};return {"ok":true,"value":listing}}
-    if command=="export"{listing:=list_records(state,"","",1000);if len(listing["warnings"])>0&&listing["warnings"][0]["code"]=="unsafe_state"{return {"ok":false,"code":"unsafe_state","error":listing["warnings"][0]["error"]}};return {"ok":true,"value":{"schema_version":"1.0.0","tool":SLUG,"records":listing["records"],"warnings":listing["warnings"],"truncated":listing["truncated"]}}}
+    if has(["history","report","export"],command) {
+        checked_limit:=bounded_int(setting(parsed,config,"limit",null),1000,1,1000);if !checked_limit["ok"]{return checked_limit}
+        after:=flag(parsed,"after","");kind:=flag(parsed,"type","")
+        if type(after)!="string"||len(after)>255{return {"ok":false,"code":"invalid_cursor","error":"after must be a filename cursor of at most 255 characters"}}
+        listing:=list_records(state,kind,after,checked_limit["value"])
+        if len(listing["warnings"])>0&&listing["warnings"][0]["code"]=="unsafe_state"{return {"ok":false,"code":"unsafe_state","error":listing["warnings"][0]["error"]}}
+        if command=="export" {
+            exported:={"schema_version":"1.0.0","tool":SLUG,"records":listing["records"],"warnings":listing["warnings"],"truncated":listing["truncated"],"next_after":listing["next_after"]}
+            output_path:=flag(parsed,"output","")
+            if output_path!="" {
+                if listing["truncated"]||len(listing["warnings"])>0 { return {"ok":false,"code":"incomplete_export","error":"file export requires a complete readable selection; use --type/--after/--limit or stdout pagination"} }
+                for part in split(replace_str(output_path,"\\","/"),"/"){if part==".."{return {"ok":false,"code":"unsafe_output","error":"export traversal is not allowed"}}}
+                if file_exists(output_path)&&(path_is_symlink(output_path)||!path_is_file(output_path)){return {"ok":false,"code":"unsafe_output","error":"export target must be a regular file"}}
+                if flag(parsed,"dry-run",false)!=true {
+                    output_error:=ensure_output_parent(output_path);if output_error!=""{return {"ok":false,"code":"unsafe_output","error":output_error}}
+                    try { write_file_atomic(output_path,to_json_pretty(exported)+"\n",flag(parsed,"force",false)) }
+                    except error { return {"ok":false,"code":"export_failed","error":"could not write export; check destination and --force"} }
+                }
+                return {"ok":true,"value":{"path":output_path,"record_count":len(listing["records"]),"dry_run":flag(parsed,"dry-run",false)}}
+            }
+            return {"ok":true,"value":exported}
+        }
+        return {"ok":true,"value":listing}
+    }
     return create_record(command,parsed,config)
 }
 
 func command_name(argv){if len(argv)==0||argv[0]=="--help"{return "help"};if argv[0]=="--version"{return "version"};return argv[0]}
-func command_tokens(argv,command){if command=="help"||(len(argv)>0&&starts_with(argv[0],"--")){return []};return slice(argv,1,len(argv))}
+func command_tokens(argv,command){if command=="help"{return []};return slice(argv,1,len(argv))}
 
 export func main(argv) {
     command:=command_name(argv)
-    if command=="help"{print(NAME+" "+VERSION+"\n\nCommands:\n  "+join(COMMANDS,"\n  ")+"\n\nFlags: --state --config --input --id --actor --timestamp --path --json --dry-run --output --force --act --yes");return 0}
+    if command=="help"{print(NAME+" "+VERSION+"\n\nCommands:\n  "+join(COMMANDS,"\n  ")+"\n\nFlags: --state --config --input --id --actor --timestamp --path --json --dry-run --output --force --act --yes --type --after --limit");return 0}
     if !has(COMMANDS,command){eprint(NAME+": unknown command: "+command);return 2}
     parsed:=parse_args(command_tokens(argv,command),["json","dry-run","force","act","yes"])
     if len(parsed["errors"])>0{eprint(NAME+": "+parsed["errors"][0]);return 2}
-    allowed:=["state","config","input","id","actor","timestamp","path","json","dry-run","output","force","act","yes"]
+    allowed:=["state","config","input","id","actor","timestamp","path","json","dry-run","output","force","act","yes","type","after","limit"]
     for name in keys(parsed["flags"]){if !has(allowed,name){eprint(NAME+": unknown flag --"+name);return 2}}
     if len(parsed["positionals"])>0{eprint(NAME+": unexpected positional argument: "+parsed["positionals"][0]);return 2}
-    result:=dispatch(command,parsed);output:=envelope(result["ok"],get(result,"value",null),get(result,"error",null),get(result,"code",null),VERSION,CONTRACT)
+    mut result:=null;try { result=dispatch(command,parsed) } except error { result={"ok":false,"code":"operation_failed","error":"operation failed: "+to_string(error)} };output:=envelope(result["ok"],get(result,"value",null),get(result,"error",null),get(result,"code",null),VERSION,CONTRACT)
     if flag(parsed,"json",false){print(to_json_pretty(output))}else if result["ok"]{print(NAME+": ok\n"+to_json_pretty(get(result,"value",null)))}else{eprint(NAME+": "+get(result,"error","operation failed"))}
     if result["ok"]{return 0};return 1
 }

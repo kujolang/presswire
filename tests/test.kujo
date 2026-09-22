@@ -1,8 +1,9 @@
+from tests.support import test_root
 from src.core import dispatch
 from src.args import parse_args
 mut pass:=0;mut fail:=0
 func check(ok,label){if ok{pass=pass+1}else{fail=fail+1;eprint("FAIL: "+label)}}
-root:="/tmp/presswire-test-"+uuid_v4()
+root := test_root("test")
 func opts(v){return parse_args(v,["json","dry-run","force","act","yes"])}
 check(dispatch("init",opts(["--state",root]))["ok"],"init")
 created:=dispatch("preflight",opts(["--state",root,"--input","fixtures/core.json","--actor","fixture-human","--timestamp","2026-08-14T00:00:00Z"]))
