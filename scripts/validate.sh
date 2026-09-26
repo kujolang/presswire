@@ -9,6 +9,7 @@ tmp_state="$(mktemp -d)"; trap 'find "$tmp_state" -depth -delete' EXIT
 export PRESSWIRE_TEST_ROOT="$tmp_state/fixtures"
 "$KUJO_RUNTIME" check presswire.kujo
 "$KUJO_RUNTIME" run tests/test.kujo
+"$KUJO_RUNTIME" run tests/approval_compatibility_test.kujo
 "$KUJO_RUNTIME" run tests/security_test.kujo
 "$KUJO_RUNTIME" run tests/storage_test.kujo
 "$KUJO_RUNTIME" run tests/domain_test.kujo

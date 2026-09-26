@@ -6,6 +6,8 @@ SLUG := "presswire"
 NAME := "PressWire"
 VERSION := "0.2.0"
 CONTRACT := "1.0.0"
+RECORD_VERSIONS := ["0.1.0","0.2.0"]
+APPROVAL_RECORD_VERSIONS := ["0.1.0","0.2.0","0.3.0"]
 DEFAULT_STATE := ".presswire"
 COMMANDS := ["preflight","adapters","capabilities","schedule","publish","status","correct","unpublish","receipt","history","doctor","version","init","show","export","validate","report"]
 EFFECT_COMMANDS := ["schedule","publish","correct","unpublish"]
@@ -70,7 +72,7 @@ func validate_approval(command, payload, requested_output) {
     approval_result := parse_object(read_file(path), "VersionSeal approval record"); if !approval_result["ok"] { return "invalid VersionSeal approval record" }
     record := approval_result["value"]
     if get(record,"id","") != payload["approval_id"] || get(record,"command","") != "approve" || get(record,"record_type","") != "decision" { return "approval identity mismatch" }
-    if get(record,"schema_version","") != "1.0.0" || get(record,"contract_version","") != "1.0.0" || !has(["0.1.0","0.2.0"],get(record,"tool_version","")) { return "approval contract mismatch" }
+    if get(record,"schema_version","") != "1.0.0" || get(record,"contract_version","") != "1.0.0" || !has(APPROVAL_RECORD_VERSIONS,get(record,"tool_version","")) { return "approval contract mismatch" }
     if !valid_timestamp(get(record,"created_at","")) || type(get(record,"actor",null)) != "string" || trim(record["actor"]) == "" { return "approval provenance is invalid" }
     approved := get(record, "payload", {})
     if type(approved) != "dict" || get(approved,"human_actor","") != record["actor"] { return "approval actor binding mismatch" }
@@ -169,7 +171,7 @@ func create_record(command, parsed, config) {
 func verify(parsed,config) {
     state:=setting(parsed,config,"state",DEFAULT_STATE);id:=flag(parsed,"id","");if id==""{return {"ok":false,"code":"id_required","error":"validation requires --id"}}
     loaded:=load_record(state,id);if !loaded["ok"]{return loaded};record:=loaded["value"]
-    if !has(["0.1.0","0.2.0"],get(record,"tool_version",""))||get(record,"contract_version","")!="1.0.0"{return {"ok":false,"code":"incompatible_record","error":"record tool or contract version is incompatible"}}
+    if !has(RECORD_VERSIONS,get(record,"tool_version",""))||get(record,"contract_version","")!="1.0.0"{return {"ok":false,"code":"incompatible_record","error":"record tool or contract version is incompatible"}}
     path:=flag(parsed,"path","");if path!=""{expected:=get(get(record,"artifact",{}),"sha256",get(record["payload"],"manifest_checksum",""));if !path_is_file(path)||path_is_symlink(path)||file_size(path)>67108864||expected==""||sha256_file(path)!=expected{return {"ok":false,"code":"checksum_drift","error":"checksum drift detected"}}}
     return {"ok":true,"value":{"valid":true,"record_id":record["id"],"checksum":loaded["checksum"]}}
 }
@@ -177,7 +179,7 @@ func verify(parsed,config) {
 export func dispatch(command,parsed) {
     config_result:=load_config(flag(parsed,"config",""));if !config_result["ok"]{return config_result};config:=config_result["value"];state:=setting(parsed,config,"state",DEFAULT_STATE)
     if command=="init"{return initialize(state,metadata())}
-    if command=="version"{return {"ok":true,"value":{"tool":SLUG,"version":VERSION,"contract_version":CONTRACT,"supported_record_versions":["0.1.0","0.2.0"],"minimum_kujo":"1.0.1"}}}
+    if command=="version"{return {"ok":true,"value":{"tool":SLUG,"version":VERSION,"contract_version":CONTRACT,"supported_record_versions":RECORD_VERSIONS,"supported_approval_record_versions":APPROVAL_RECORD_VERSIONS,"minimum_kujo":"1.0.1"}}}
     if command=="doctor"{
         state_error:=validate_state_path(state);listing:={"records":[],"warnings":[],"truncated":false}
         if state_error==""{listing=list_records(state,"","",1000)}

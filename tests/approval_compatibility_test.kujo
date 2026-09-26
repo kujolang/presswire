@@ -1,0 +1,54 @@
+from tests.support import test_root
+from src.core import dispatch
+from src.args import parse_args
+mut passed := 0
+mut failed := 0
+func check(ok,label) { if ok { passed=passed+1 } else { failed=failed+1; eprint("FAIL: "+label) } }
+func opts(values) { return parse_args(values,["json","dry-run","force","act","yes"]) }
+root := test_root("approval_compatibility")
+source := root+"/source"
+write_file(source,"approved publication bytes",true)
+checksum := sha256_file(source)
+versions := dispatch("version",opts([]))["value"]
+check(versions["supported_record_versions"]==["0.1.0","0.2.0"],"native PressWire record versions unchanged")
+check(versions["supported_approval_record_versions"]==["0.1.0","0.2.0","0.3.0"],"VersionSeal approval versions advertised separately")
+for version in ["0.1.0","0.2.0","0.3.0"] {
+    state := root+"/state-"+version
+    output := root+"/published-"+version
+    approval_path := root+"/approval-"+version+".json"
+    // VersionSeal's decision envelope, including artifact and preserved metadata.
+    approval := {"schema_version":"1.0.0","tool_version":version,"contract_version":"1.0.0","id":"approval-compat","record_type":"decision","command":"approve","actor":"human-editor","created_at":"2026-09-26T10:00:00Z","provenance":[],"artifact":{"path":source,"sha256":checksum,"bytes":file_size(source)},"payload":{"schema_version":"1.0.0","human_actor":"human-editor","package_id":"package-compat","package_version":"1.0.0","manifest_checksum":checksum,"destination":"local-fixture","action":"publish","output_path":output}}
+    input := root+"/input-"+version+".json"
+    write_file(input,to_json({"schema_version":"1.0.0","approval_id":"approval-compat","approval_record_path":approval_path,"manifest_checksum":checksum,"destination":"local-fixture","authorized_action":"publish"}),true)
+    base := ["--id","publication-compat","--state",state,"--input",input,"--actor","publisher","--path",source,"--output",output,"--act","--yes"]
+    // Each mutation starts from the same valid record and must fail before delivery.
+    for mutation in [["id","approval-other"],["command","reject"],["record_type","request"],["schema_version","2.0.0"],["contract_version","2.0.0"],["tool_version","0.4.0"],["tool_version",""],["actor",""],["actor","other-editor"],["created_at","2026-02-30T10:00:00Z"],["payload",[]]] {
+        changed := parse_json(to_json(approval))
+        changed[mutation[0]]=mutation[1]
+        write_file(approval_path,to_json(changed),true)
+        result := dispatch("publish",opts(concat(base,["--force"])))
+        check(!result["ok"]&&result["code"]=="authorization_failed"&&!file_exists(output),version+" rejects "+mutation[0])
+    }
+    for mutation in [["human_actor","other-editor"],["manifest_checksum",sha256("different")],["destination","other-destination"],["action","unpublish"],["output_path",root+"/elsewhere"],["output_path",output+"/../alias"],["output_path",""],["output_path",123]] {
+        changed := parse_json(to_json(approval))
+        payload := changed["payload"]
+        payload[mutation[0]]=mutation[1]
+        changed["payload"]=payload
+        write_file(approval_path,to_json(changed),true)
+        result := dispatch("publish",opts(concat(base,["--force"])))
+        check(!result["ok"]&&result["code"]=="authorization_failed"&&!file_exists(output),version+" rejects payload "+mutation[0])
+    }
+    // Legacy destination labels without a concrete output_path remain supported.
+    legacy := parse_json(to_json(approval))
+    legacy["payload"]={"human_actor":"human-editor","package_id":"package-compat","package_version":"1.0.0","manifest_checksum":checksum,"destination":"local-fixture","action":"publish"}
+    write_file(approval_path,to_json(legacy),true)
+    check(dispatch("publish",opts(concat(base,["--dry-run"])))["ok"]&&!file_exists(output),version+" accepts absent optional output path")
+    write_file(approval_path,to_json(approval),true)
+    published := dispatch("publish",opts(base))
+    check(published["ok"]&&file_exists(output)&&sha256_file(output)==checksum,version+" publishes exact approved bytes")
+    if published["ok"] {
+        check(dispatch("validate",opts(["--state",state,"--id","publication-compat","--path",output]))["ok"],version+" publication receipt validates")
+    }
+}
+print(to_string(passed)+" passed; "+to_string(failed)+" failed")
+if failed>0 { exit(1) }
